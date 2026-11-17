@@ -116,6 +116,7 @@ static const uint8_t dither512[512][2] = {
 };
 static uint8_t digitalCga[8];
 static uint8_t txt64near[64];
+static uint8_t txt64tile[64][2];
 
 static uint8_t analog[16][3];
 static uint8_t pal4096[16][3];
@@ -185,7 +186,12 @@ static void build256(uint8_t reg0a) {
         pal256near[i] = (uint8_t)nearest16(r, g, b);
         tile2x2(r, g, b, tile256[i]);
     }
-    for (int i = 0; i < 64; i++) txt64near[i] = pal256near[((i & 0x38) << 1) | (i & 7)];
+    if (reg0a != 0xFF) return;
+    for (int i = 0; i < 64; i++) {
+        const int p = ((i & 0x38) << 1) | (i & 7);
+        txt64near[i] = pal256near[p];
+        txt64tile[i][0] = tile256[p][0]; txt64tile[i][1] = tile256[p][1];
+    }
 }
 
 void mzVideoPalette(uint8_t rgb[16][3]) { memcpy(rgb, use256 ? pal256out : use4096 ? pal4096 : analog, sizeof(analog)); }
@@ -240,8 +246,11 @@ void mzVideoSignal(int id, bool on) {
 void MZ_FAST mzVideoVline(int v) {
     if (v == textreg[5] * 2) mz_vblank_t = true;
     else if (v == textreg[3] * 2) mz_vblank_t = false;
-    if (v == GDEVE) { mz_vblank_g = true; clear_flag = 0; }
-    else if (v == GDEVS) mz_vblank_g = false;
+    const uint8_t m = cgreg[0x0E];
+    const int k = (m == 0x03 || m == 0x93 || m == 0x19 || m == 0x99) ? 1 : 2;
+    const int ge = (GDEVE * k < MZ_LINES_FRAME) ? GDEVE * k : GDEVE, gs = (GDEVS * k < MZ_LINES_FRAME) ? GDEVS * k : GDEVS;
+    if (v == ge) { mz_vblank_g = true; clear_flag = 0; }
+    else if (v == gs) mz_vblank_g = false;
 }
 
 static inline bool rmwPlane(uint8_t *p, uint8_t mode, bool on, uint8_t col, uint8_t data) {
@@ -688,7 +697,7 @@ static void renderGeneric(int y, uint8_t *dst) {
             if (t == 0 || t == 16) tc = 255;
             else if (t == 8) tc = 0;
             else if (t < 8) tc = digitalCga[t];
-            else tc = txt64near[(t - 16) & 63];
+            else tc = (uint8_t)((txt64tile[(t - 16) & 63][yl] >> sh) & 15);
             if (inV && x >= hs && x < he) {
                 const uint8_t c = cg[x];
                 const bool fr = (palette_reg[c >> 4] & 0x10) != 0;
@@ -779,7 +788,7 @@ static void MZ_FAST cellWords(uint16_t src, int i, uint8_t trans, bool dbl, uint
     }
 }
 
-struct MzTextRow { bool valid; uint32_t key, layout; int n; uint8_t x[80]; };
+struct MzTextRow { bool valid; uint32_t key, layout; int n; uint8_t x[80]; const uint8_t *p[80]; };
 static MzTextRow textRowList;
 #ifdef _MSC_VER
 __declspec(noinline)
@@ -794,10 +803,12 @@ static void buildTextRow(uint16_t base, int c, int n, uint32_t key) {
         const uint16_t src = (uint16_t)((base + c * n + x) & 0x7FF);
         const uint8_t t1 = M.tvram[src], t2 = M.tvram[0x1000 + src], attr = M.tvram[0x800 + src];
         bool dots = (attr & 0xC0) != 0;
+        const uint8_t *pp = nullptr;
         if (!dots) {
             const uint8_t sel = (uint8_t)((t2 & 0xC0) | (attr & 0x38));
             if (sel & 0x08) {
                 const uint32_t code = font_size ? (uint32_t)t1 << 3 : (uint32_t)(t1 & 0xFE) << 3;
+                pp = M.pcg + 0x800 + code;
                 for (int i = 0; i < lines && !dots; i++) dots = (M.pcg[0x800 + code + i] | M.pcg[0x1000 + code + i] | M.pcg[0x1800 + code + i]) != 0;
             } else {
                 const uint8_t *pat;
@@ -816,7 +827,7 @@ static void buildTextRow(uint16_t base, int c, int n, uint32_t key) {
                 for (int i = 0; i < lines && !dots; i++) dots = pat[code + i] != 0;
             }
         }
-        if (dots) R.x[R.n++] = (uint8_t)x;
+        if (dots) { R.x[R.n] = (uint8_t)x; R.p[R.n] = pp; R.n++; }
     }
 }
 
@@ -852,9 +863,19 @@ static bool MZ_FAST textWords(int r, uint32_t ts) {
         if (!textRowList.valid || textRowList.key != rk || textRowList.layout != layout_gen) buildTextRow(base, c, n, rk);
         for (int g = 0; g < 80; g++) txw[g] = T;
         const MzTextRow &R = textRowList;
+        const uint32_t tr = trans ? 0x88888888u : 0;
         for (int k = 0; k < R.n; k++) {
             const int x = R.x[k];
-            cellWords((uint16_t)((base + c * n + x) & 0x7FF), i, trans, dbl, &txw[dbl ? 2 * x : x]);
+            uint32_t *w = &txw[dbl ? 2 * x : x];
+            const uint8_t *p = R.p[k];
+            if (p) {
+                const uint8_t p1 = p[i], p2 = p[0x800 + i], p3 = p[0x1000 + i], any = (uint8_t)(p1 | p2 | p3);
+                if (!dbl) w[0] = spreadT[p1] | (spreadT[p2] << 1) | (spreadT[p3] << 2) | (tr & ~(spreadT[any] * 15u));
+                else {
+                    w[0] = spreadTD[p1 >> 4] | (spreadTD[p2 >> 4] << 1) | (spreadTD[p3 >> 4] << 2) | (tr & ~(spreadTD[any >> 4] * 15u));
+                    w[1] = spreadTD[p1 & 15] | (spreadTD[p2 & 15] << 1) | (spreadTD[p3 & 15] << 2) | (tr & ~(spreadTD[any & 15] * 15u));
+                }
+            } else cellWords((uint16_t)((base + c * n + x) & 0x7FF), i, trans, dbl, w);
         }
     } else {
         for (int x = 0; x < 40; x++) {
@@ -1091,17 +1112,10 @@ static uint32_t txLineSum(int r) {
 }
 
 static uint8_t cgLut[256], frontLut[256], txtLutIn[256], txtLutOut[256];
+static uint8_t txt0Lut[256];
 static uint8_t lutCg[16], lutTxtc[9], lutTxtOut[9];
 static uint32_t lutFront;
 static bool lutValid, cgIdent;
-#ifndef MZ_COMPOSE2
-#define MZ_COMPOSE2 0
-#endif
-#if MZ_COMPOSE2
-static uint8_t outTLut[256];
-static uint32_t outTKey;
-static bool outTValid;
-#endif
 static int copyHs, copyHe;
 static uint32_t copyFrame;
 
@@ -1129,29 +1143,18 @@ static void rebuildLuts(const uint8_t *cgcol, uint32_t front, const uint8_t *txt
         memcpy(lutTxtOut, txtOut, 9);
         for (int v = 0; v < 256; v++) txtLutOut[v] = (uint8_t)((((v >> 4) < 9 ? txtOut[v >> 4] : 0) << 4) | ((v & 15) < 9 ? txtOut[v & 15] : 0));
     }
-    lutValid = true;
-#if MZ_COMPOSE2
-    outTValid = false;
-#endif
-}
-
-#if MZ_COMPOSE2
-#ifdef _MSC_VER
-__declspec(noinline)
-#else
-__attribute__((noinline))
-#endif
-static void buildOutT(uint32_t T, uint32_t front) {
-    for (int v = 0; v < 256; v++) {
-        const uint32_t ci = (uint32_t)v * 0x01010101u;
-        const uint32_t c = lut4(cgLut, ci);
-        uint32_t m = nz4(T);
-        if (front) m &= ~lut4(frontLut, ci);
-        outTLut[v] = (uint8_t)((c & ~m) | (lut4(txtLutIn, T) & m));
+    {
+        const uint8_t cg0 = cgcol[0];
+        const bool f0 = (front & 1) != 0;
+        for (int v = 0; v < 256; v++) {
+            const int hi = v >> 4, lo = v & 15;
+            const uint8_t oh = (hi != 0 && !f0) ? (hi < 9 ? txtc[hi] : 0) : cg0;
+            const uint8_t ol = (lo != 0 && !f0) ? (lo < 9 ? txtc[lo] : 0) : cg0;
+            txt0Lut[v] = (uint8_t)((oh << 4) | ol);
+        }
     }
-    outTKey = T; outTValid = true;
+    lutValid = true;
 }
-#endif
 
 static uint8_t colCg[16], colTxtc[9], colTxtOut[9];
 static uint32_t colFront, colSig, colLayout, colColor;
@@ -1226,6 +1229,7 @@ static void build256Out() {
 
 static void text64Words(int r, uint32_t *tw, uint32_t *mt) {
     const uint8_t trans = (textreg[0] & 2) ? 8 : 0;
+    const int yl = r & 1;
     const uint32_t transM = trans ? 0xFFFFFFFFu : 0;
     const int line = (textreg[0] & 0x10) ? 2 : 0;
     const int height = (textreg[0] & 0x10) ? 20 : 16;
@@ -1251,7 +1255,7 @@ static void text64Words(int r, uint32_t *tw, uint32_t *mt) {
                 for (int s = 0; s < 32; s += 4) {
                     const uint32_t av = (a[k] >> s) & 15, bv = (b[k] >> s) & 15;
                     const uint32_t v = ((av & 7) << 3) | (bv & 7);
-                    if (v) { o |= (uint32_t)txt64near[v] << s; m |= 15u << s; }
+                    if (v) { o |= (uint32_t)((txt64tile[v][yl] >> (s & 4)) & 15) << s; m |= 15u << s; }
                     else if ((av & 8) && (bv & 8)) m |= 15u << s;
                 }
                 tw[2 * x + k] = o; mt[2 * x + k] = m;
@@ -1374,32 +1378,15 @@ static int MZ_FAST renderFast(int y, uint8_t *dst) {
     if (front == 0xFFFF) {
         for (; g < gHe; g++) d[g] = cgIdent ? cgw[g] : lut4(cgLut, cgw[g]);
     } else {
-#if MZ_COMPOSE2
-        const uint32_t T = fill4((textreg[0] & 2) ? 8 : 0);
-        if (T) {
-            if (!outTValid || outTKey != T) buildOutT(T, front);
-            for (; g < gHe; g++) {
-                const uint32_t ci = cgw[g], t = txw[g];
-                if (t == T) { d[g] = lut4(outTLut, ci); continue; }
-                uint32_t c = cgIdent ? ci : lut4(cgLut, ci);
-                if (t) {
-                    uint32_t m = nz4(t);
-                    if (front) m &= ~lut4(frontLut, ci);
-                    c = (c & ~m) | (lut4(txtLutIn, t) & m);
-                }
-                d[g] = c;
-            }
-        }
-#endif
         for (; g < gHe; g++) {
             const uint32_t ci = cgw[g], t = txw[g];
-            uint32_t c = cgIdent ? ci : lut4(cgLut, ci);
             if (t) {
+                if (!ci) { d[g] = lut4(txt0Lut, t); continue; }
+                const uint32_t c = cgIdent ? ci : lut4(cgLut, ci);
                 uint32_t m = nz4(t);
                 if (front) m &= ~lut4(frontLut, ci);
-                c = (c & ~m) | (lut4(txtLutIn, t) & m);
-            }
-            d[g] = c;
+                d[g] = (c & ~m) | (lut4(txtLutIn, t) & m);
+            } else d[g] = cgIdent ? ci : lut4(cgLut, ci);
         }
     }
     for (; g < 80; g++) d[g] = lut4(txtLutOut, txw[g]);
