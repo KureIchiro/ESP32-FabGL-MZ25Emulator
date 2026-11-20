@@ -15,6 +15,12 @@
 #define MZ_FAST IRAM_ATTR
 #endif
 
+#if defined(BOARD_HAS_PSRAM) && !defined(EMU_PSRAM_NO_ERRATA_FIX)
+#define MZ_FAST_OPT
+#else
+#define MZ_FAST_OPT MZ_FAST
+#endif
+
 #define MZ_CPU_CLOCK      6000000
 #define MZ_LINES_FRAME    448
 #define MZ_CYC_FRAME      108128
