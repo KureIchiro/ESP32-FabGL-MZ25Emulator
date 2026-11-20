@@ -5,7 +5,7 @@
  *
  * 【クレジットと謝辞】
  *  - グラフィック/オーディオエンジン: Fabrizio Di Vittorio氏による FabGL
- *  - Z80 CPUコア: Marat Fayzullin氏によるコードをベースに改変
+ *  - Z80 CPUコア: このシリーズのために書いた z80core(MIT ライセンス。待ちループの早送りは mz_spin.c)
  *  - 動きの手本: 武田俊也さんの Common Source Code Project(EmuZ-2500)、MAME mz2500.cpp
  *
  * 【必要なファイル（SDカード）】
@@ -55,7 +55,7 @@
 #else
 #define psramFixMissing() (ESP.getChipRevision() < 3)
 #endif
-#include "Z80.h"
+#include "z80core.h"
 #include "mz.h"
 #include "ym2203.h"
 
@@ -90,7 +90,7 @@
 // #define SD_MOSI 12
 // #define SD_CS   13
 
-// Switch Science FabGL 
+// Switch Science FabGL
 // #define SD_SCLK 14
 // #define SD_MISO 35
 // #define SD_MOSI 2
@@ -1164,8 +1164,8 @@ void cpuTask(void *pvParameters) {
       mzLineStart(i);
       const int cyc = mz_cyc_line;
       const int run = cyc - cpuDebt;
-      if (run > 0) cpuDebt = -ExecZ80(&mz_cpu, run); else cpuDebt = -run;
-      if (mzIrqPending() && (mz_cpu.IFF & IFF_1)) IntZ80(&mz_cpu, mzIrqAck());
+      if (run > 0) cpuDebt = -mzZ80Run(&mz_cpu, run); else cpuDebt = -run;
+      if (mzIrqPending() && mz_cpu.iff1) z80core_int(&mz_cpu, mzIrqAck());
       mzLineEnd(i);
       opnEmuClock += cyc;
       msAcc += cyc;
@@ -1340,10 +1340,7 @@ void setup() {
   mzInit();
   setClockFromBuild();
   mzReset();
-  memset(&mz_cpu, 0, sizeof(mz_cpu));
-  mz_cpu.IPeriod = 241;
-  mz_cpu.TrapBadOps = 0;
-  ResetZ80(&mz_cpu);
+  z80core_init(&mz_cpu);
   applyPalette();
 
   Serial.println("MZ-2500 Booting...");

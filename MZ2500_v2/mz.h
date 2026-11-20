@@ -6,7 +6,7 @@
 // ============================================================================
 #pragma once
 #include <stdint.h>
-#include "Z80.h"
+#include "z80core.h"
 
 #ifdef _MSC_VER
 #define MZ_FAST
@@ -22,11 +22,12 @@
 #define MZ_SCREEN_W       640
 #define MZ_SCREEN_H       400
 
-extern Z80 mz_cpu;
+extern z80_t mz_cpu;
+extern "C" int mzZ80Run(z80_t *z, int cycles);
 extern int mz_line;
 extern int mz_cyc_line;
 static inline int mzLineCycle() {
-    int c = mz_cyc_line - mz_cpu.ICount;
+    int c = mz_cyc_line - mz_cpu.icount;
     return c < 0 ? 0 : c;
 }
 

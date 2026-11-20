@@ -11,7 +11,7 @@
 #include <string.h>
 #include <stdio.h>
 
-Z80 mz_cpu;
+z80_t mz_cpu;
 MzMem M;
 uint8_t *mz_rd_map[32], *mz_wr_map[32];
 int mz_line = 0;
@@ -80,7 +80,7 @@ static inline void vramWait(int b) {
     } else {
         if (!mz_vblank_g && pos >= mz_hd_gs && pos < mz_hd_ge) stall += mz_hd_ge - pos;
     }
-    mz_cpu.ICount -= stall;
+    mz_cpu.icount -= stall;
 }
 
 #if defined(__GNUC__)
@@ -89,7 +89,7 @@ static inline void vramWait(int b) {
 #define MZ_ALWAYS_INLINE inline
 #endif
 
-static MZ_ALWAYS_INLINE byte mzRdSlowBody(zword A) {
+static MZ_ALWAYS_INLINE uint8_t mzRdSlowBody(uint16_t A) {
     const int b = A >> 13, ofs = A & 0x1FFF;
     vramWait(b);
     switch (page_type[b]) {
@@ -102,9 +102,9 @@ static MZ_ALWAYS_INLINE byte mzRdSlowBody(zword A) {
     }
     return 0xFF;
 }
-extern "C" byte MZ_FAST MzRdSlow(zword A) { return mzRdSlowBody(A); }
+extern "C" uint8_t MZ_FAST MzRdSlow(uint16_t A) { return mzRdSlowBody(A); }
 
-static MZ_ALWAYS_INLINE void mzWrSlowBody(zword A, byte V) {
+static MZ_ALWAYS_INLINE void mzWrSlowBody(uint16_t A, uint8_t V) {
     const int b = A >> 13, ofs = A & 0x1FFF;
     vramWait(b);
     switch (page_type[b]) {
@@ -117,7 +117,7 @@ static MZ_ALWAYS_INLINE void mzWrSlowBody(zword A, byte V) {
             break;
     }
 }
-extern "C" void MZ_FAST MzWrSlow(zword A, byte V) { mzWrSlowBody(A, V); }
+extern "C" void MZ_FAST MzWrSlow(uint16_t A, uint8_t V) { mzWrSlowBody(A, V); }
 
 struct IrqCh { bool enb, req, inService; uint8_t vector; };
 static IrqCh irqc[4];
@@ -254,7 +254,7 @@ static void ppiPortCOut(uint8_t v) {
     ppi_c = v;
     if (chg & 0x01) mzVideoSignal(MZV_MASK, (v & 0x01) != 0);
     if (chg & 0x04) mzBeepHook((v & 0x04) != 0);
-    if (!(old & 0x02) && (v & 0x02)) { special_reset_req = true; mz_cpu.ICount = 0; }
+    if (!(old & 0x02) && (v & 0x02)) { special_reset_req = true; mz_cpu.icount = 0; }
     if ((old & 0x08) && !(v & 0x08)) ipl_reset_cyc = MZ_CPU_CLOCK / 10000;
     else if (!(old & 0x08) && (v & 0x08)) ipl_reset_cyc = -1;
 }
@@ -531,7 +531,7 @@ static uint8_t joyRead() {
 void (*mz_out_trace)(uint16_t port, uint8_t val) = nullptr;
 void (*mz_in_trace)(uint16_t port, uint8_t val) = nullptr;
 #endif
-static MZ_ALWAYS_INLINE void outBody(zword port, byte v) {
+static MZ_ALWAYS_INLINE void outBody(uint16_t port, uint8_t v) {
     const uint8_t p = port & 0xFF;
 #ifdef _MSC_VER
     if (mz_out_trace) mz_out_trace(port, v);
@@ -557,21 +557,21 @@ static MZ_ALWAYS_INLINE void outBody(zword port, byte v) {
             if (irqc_select & 0x10) irqc[3].vector = v;
             return;
         case 0xC8:
-            mz_cpu.ICount -= 1; opn_addr = v;
+            mz_cpu.icount -= 1; opn_addr = v;
             if (v >= 0x2D && v <= 0x2F) { ym2203TimerWrite(opn_timer, v, 0); mzOpnWriteHook(v, 0); }
             return;
-        case 0xC9: mz_cpu.ICount -= 1; opnWrite(v); return;
-        case 0xCC: mz_cpu.ICount -= 3; rtcWrite(port >> 8, v); return;
+        case 0xC9: mz_cpu.icount -= 1; opnWrite(v); return;
+        case 0xCC: mz_cpu.icount -= 3; rtcWrite(port >> 8, v); return;
         case 0xCE:
             dic_bank = v & 0x1F;
             for (int b = 0; b < 8; b++) if (page[b] == 0x3A) setMap(b, 0x3A);
             return;
         case 0xCF: kanji_bank = v; return;
         case 0xD8: case 0xD9: case 0xDA: case 0xDB: case 0xDC: case 0xDD: case 0xDE: case 0xDF:
-            mz_cpu.ICount -= 1; mzFdcWriteIO(port, v); return;
+            mz_cpu.icount -= 1; mzFdcWriteIO(port, v); return;
         case 0xE0: case 0xE1: case 0xE2: case 0xE3: ppiWrite(p, v); return;
         case 0xE4: case 0xE5: case 0xE6: case 0xE7: pitWrite(p, v); return;
-        case 0xE8: case 0xE9: case 0xEA: case 0xEB: mz_cpu.ICount -= 1; pioWrite(p, v); return;
+        case 0xE8: case 0xE9: case 0xEA: case 0xEB: mz_cpu.icount -= 1; pioWrite(p, v); return;
         case 0xEF: joy_mode = v; return;
         case 0xF0: case 0xF1: case 0xF2: case 0xF3:
             for (int ch = 0; ch < 2; ch++) { pitGate(ch, true); pitGate(ch, false); pitGate(ch, true); }
@@ -580,9 +580,9 @@ static MZ_ALWAYS_INLINE void outBody(zword port, byte v) {
         default: return;
     }
 }
-extern "C" void MZ_FAST OutZ80(zword port, byte v) { outBody(port, v); }
+extern "C" void MZ_FAST OutZ80(uint16_t port, uint8_t v) { outBody(port, v); }
 
-static inline uint8_t ioRead(zword port) {
+static inline uint8_t ioRead(uint16_t port) {
     const uint8_t p = port & 0xFF;
     switch (p) {
         case 0xA0: case 0xA1: case 0xA2: case 0xA3:
@@ -591,20 +591,20 @@ static inline uint8_t ioRead(zword port) {
         case 0xB4: return bank_sel;
         case 0xB5: { const uint8_t v = page[bank_sel]; bank_sel = (bank_sel + 1) & 7; return v; }
         case 0xBC: case 0xBD: case 0xBE: case 0xBF: return mzVideoReadIO(port);
-        case 0xC8: mz_cpu.ICount -= 1; return opn_timer.status & 3;
-        case 0xC9: mz_cpu.ICount -= 1; return opnRead();
+        case 0xC8: mz_cpu.icount -= 1; return opn_timer.status & 3;
+        case 0xC9: mz_cpu.icount -= 1; return opnRead();
         case 0xCA: return 0x30;
-        case 0xCC: mz_cpu.ICount -= 3; return rtcReadReg(port >> 8);
-        case 0xD8: case 0xD9: case 0xDA: case 0xDB: mz_cpu.ICount -= 1; return mzFdcReadIO(port);
+        case 0xCC: mz_cpu.icount -= 3; return rtcReadReg(port >> 8);
+        case 0xD8: case 0xD9: case 0xDA: case 0xDB: mz_cpu.icount -= 1; return mzFdcReadIO(port);
         case 0xE0: case 0xE1: case 0xE2: case 0xE3: return ppiRead(p);
         case 0xE4: case 0xE5: case 0xE6: case 0xE7: return pitRead(p);
-        case 0xE8: case 0xE9: case 0xEA: case 0xEB: mz_cpu.ICount -= 1; return pioRead(p);
+        case 0xE8: case 0xE9: case 0xEA: case 0xEB: mz_cpu.icount -= 1; return pioRead(p);
         case 0xEF: return joyRead();
         case 0xF4: case 0xF5: case 0xF6: case 0xF7: return mzVideoReadIO(port);
     }
     return 0xFF;
 }
-extern "C" byte MZ_FAST mzIoPeek(byte port) {
+extern "C" uint8_t MZ_FAST mzIoPeek(uint8_t port) {
     switch (port) {
         case 0xBC: case 0xBD: case 0xBE: case 0xBF: return mzVideoReadIO(port);
         case 0xC8: return opn_timer.status & 3;
@@ -613,15 +613,13 @@ extern "C" byte MZ_FAST mzIoPeek(byte port) {
     return 0xFF;
 }
 
-extern "C" byte MZ_FAST InZ80(zword port) {
+extern "C" uint8_t MZ_FAST InZ80(uint16_t port) {
     const uint8_t v = ioRead(port);
 #ifdef _MSC_VER
     if (mz_in_trace) mz_in_trace(port, v);
 #endif
     return v;
 }
-
-extern "C" void PatchZ80(Z80 *R) { (void)R; }
 
 void mzInit() {
     memset(rdmy, 0xFF, sizeof(rdmy));
@@ -685,12 +683,12 @@ void MZ_FAST mzLineStart(int line) {
 }
 
 static void specialReset() {
-    Z80 &R = mz_cpu;
-    R.PC.W = 0; R.SPtr.W = 0;
-    R.AF.W = R.BC.W = R.DE.W = R.HL.W = 0; R.AF.B.l = Z_FLAG;
-    R.AF1.W = R.BC1.W = R.DE1.W = R.HL1.W = 0;
-    R.I = R.R = 0;
-    R.IFF = 0;
+    z80_t &R = mz_cpu;
+    R.pc.w = 0; R.sp.w = 0;
+    R.af.w = R.bc.w = R.de.w = R.hl.w = 0; R.af.b.l = 0x40;
+    R.af2 = R.bc2 = R.de2 = R.hl2 = 0;
+    R.i = R.r = R.r7 = 0;
+    R.iff1 = R.iff2 = 0; R.im = 0; R.halted = 0; R.ei_delay = 0; R.irq = 0;
     bank_sel = 0;
     for (int b = 0; b < 8; b++) setMap(b, (uint8_t)b);
 }
@@ -700,7 +698,7 @@ void MZ_FAST mzLineEnd(int line) {
     if (special_reset_req) { special_reset_req = false; specialReset(); }
     if (ipl_reset_cyc >= 0) {
         ipl_reset_cyc -= (int)cyc;
-        if (ipl_reset_cyc < 0) { mzReset(); ResetZ80(&mz_cpu); return; }
+        if (ipl_reset_cyc < 0) { mzReset(); z80core_reset(&mz_cpu); return; }
     }
     frame_cyc += cyc;
     if (mz_sio_busy) mzSioTick(cyc);
