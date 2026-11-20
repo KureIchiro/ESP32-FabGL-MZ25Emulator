@@ -834,7 +834,7 @@ static void buildTextRow(uint16_t base, int c, int n, uint32_t key) {
 static uint32_t txw[80];
 static uint32_t txwGen, txwLayout, txwSum;
 static int txwKey = -100;
-static bool MZ_FAST textWords(int r, uint32_t ts) {
+static bool MZ_FAST_OPT textWords(int r, uint32_t ts) {
     const uint8_t trans = (textreg[0] & 2) ? 8 : 0;
     const int line = (textreg[0] & 0x10) ? 2 : 0;
     const int height = (textreg[0] & 0x10) ? 20 : 16;
