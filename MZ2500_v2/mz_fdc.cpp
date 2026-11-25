@@ -485,7 +485,7 @@ bool mzFdcDrq() {
     return mode == M_READ || mode == M_READADDR || mode == M_READTRACK || mode == M_WRITE || mode == M_WRITETRACK;
 }
 
-void MZ_FAST mzFdcLineTick() {
+void mzFdcLineTick() {
     if (fdc_drq_delay > 0) { fdc_drq_delay -= mz_cyc_line; if (fdc_drq_delay < 0) fdc_drq_delay = 0; }
     else if ((mode == M_WRITE || mode == M_WRITETRACK) && data_index == 0) {
         fdc_write_idle += mz_cyc_line;

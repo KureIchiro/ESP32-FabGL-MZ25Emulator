@@ -29,19 +29,19 @@ int mzSpinHook(struct z80 *z, uint16_t b, uint16_t t, int cyc);
 
 #define Z80CORE_M1_WAIT 1
 #define Z80CORE_RD(a) ({ const uint8_t *pr_ = mz_rd_map[(a) >> 11]; uint8_t vr_; \
-  if (__builtin_expect(pr_ != 0, 1)) vr_ = pr_[(a) & 0x07FF]; else { Z80CORE_SYNC_OUT(); vr_ = MzRdSlow(a); Z80CORE_SYNC_IN(); } vr_; })
+  if (__builtin_expect(pr_ != 0, 1)) vr_ = pr_[(a) & 0x07FF]; else { Z80CORE_SYNC_OUT_MEM(); vr_ = MzRdSlow(a); Z80CORE_SYNC_IN_MEM(); } vr_; })
 #define Z80CORE_WR(a, v) do { uint8_t *pw_ = mz_wr_map[(a) >> 11]; \
-  if (__builtin_expect(pw_ != 0, 1)) pw_[(a) & 0x07FF] = (v); else { Z80CORE_SYNC_OUT(); MzWrSlow((a), (v)); Z80CORE_SYNC_IN(); } } while (0)
+  if (__builtin_expect(pw_ != 0, 1)) pw_[(a) & 0x07FF] = (v); else { Z80CORE_SYNC_OUT_MEM(); MzWrSlow((a), (v)); Z80CORE_SYNC_IN_MEM(); } } while (0)
 #define Z80CORE_IN(p) ({ Z80CORE_SYNC_OUT(); const uint8_t vi_ = InZ80(p); Z80CORE_SYNC_IN(); vi_; })
 #define Z80CORE_OUT(p, v) do { Z80CORE_SYNC_OUT(); OutZ80((p), (v)); Z80CORE_SYNC_IN(); } while (0)
 #define Z80CORE_RETI() mzReti()
 #define Z80CORE_EI() (z->irq = 1)
 #define Z80CORE_IRQ_ACK() ({ Z80CORE_SYNC_OUT(); const int va_ = mzIrqTake(); Z80CORE_SYNC_IN(); z->irq = 0; va_; })
 #if MZ_IDLE_SKIP
-#define Z80CORE_SPIN(b, t) do { if ((uint16_t)((b) - (t)) <= MZ_SP_MAXLEN) cyc = mzSpinHook(z, (b), (t), cyc); } while (0)
+#define Z80CORE_SPIN(b, t) do { if ((uint16_t)((b) - (t)) <= MZ_SP_MAXLEN) { Z80CORE_R_OUT(); cyc = mzSpinHook(z, (b), (t), cyc); Z80CORE_R_IN(); } } while (0)
 #define Z80CORE_ON_INT() (mz_sp_have = 0)
 #endif
-#if defined(ARDUINO)
+#if defined(ARDUINO) && !(defined(BOARD_HAS_PSRAM) && !defined(EMU_PSRAM_NO_ERRATA_FIX))
 #include <esp_attr.h>
 #define Z80CORE_ED_ATTR IRAM_ATTR __attribute__((noinline))
 #endif

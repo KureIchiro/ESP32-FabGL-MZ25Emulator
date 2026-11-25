@@ -1116,6 +1116,14 @@ static void vgaWaitFrame(int64_t frameStart) {
   }
 }
 
+#ifndef MZ_Z80_PROF
+#define MZ_Z80_PROF 1
+#endif
+#if defined(USE_SERIAL_DEBUG) && MZ_Z80_PROF
+static inline uint32_t mzCcount() { uint32_t c; __asm__ __volatile__("rsr %0, ccount" : "=a"(c)); return c; }
+extern uint32_t mz_irq_taken_ei;
+#endif
+
 void cpuTask(void *pvParameters) {
   const int64_t frameTimeUs = MZ_FRAME_US;
   int64_t nextFrameTime = esp_timer_get_time();
@@ -1130,6 +1138,10 @@ void cpuTask(void *pvParameters) {
 #ifdef USE_SERIAL_DEBUG
   int64_t dbgMin = INT64_MAX, dbgMax = 0, dbgSum = 0, dbgWinStart = 0, dbgIdle = 0;
   int dbgOverBudget = 0, dbgFrameCnt = 0;
+#if MZ_Z80_PROF
+  uint64_t dbgCycZ80 = 0;
+  uint32_t dbgZ80Max = 0, dbgIrqLine = 0, dbgIrqEi0 = mz_irq_taken_ei;
+#endif
 #endif
 
   while (1) {
@@ -1143,6 +1155,9 @@ void cpuTask(void *pvParameters) {
 #ifdef USE_SERIAL_DEBUG
     int64_t frameStart = esp_timer_get_time();
     if (dbgFrameCnt == 0) dbgWinStart = frameStart;
+#if MZ_Z80_PROF
+    uint32_t dbgZ80Frame = 0;
+#endif
 #endif
     if (paletteForce || mz_palette_gen != shownPalGen) {
       paletteForce = false;
@@ -1164,8 +1179,19 @@ void cpuTask(void *pvParameters) {
       mzLineStart(i);
       const int cyc = mz_cyc_line;
       const int run = cyc - cpuDebt;
+#if defined(USE_SERIAL_DEBUG) && MZ_Z80_PROF
+      const uint32_t zc0 = mzCcount();
+#endif
       if (run > 0) cpuDebt = -mzZ80Run(&mz_cpu, run); else cpuDebt = -run;
-      if (mzIrqPending() && mz_cpu.iff1) z80core_int(&mz_cpu, mzIrqAck());
+      if (mzIrqPending() && mz_cpu.iff1) {
+        z80core_int(&mz_cpu, mzIrqAck());
+#if defined(USE_SERIAL_DEBUG) && MZ_Z80_PROF
+        dbgIrqLine++;
+#endif
+      }
+#if defined(USE_SERIAL_DEBUG) && MZ_Z80_PROF
+      dbgZ80Frame += mzCcount() - zc0;
+#endif
       mzLineEnd(i);
       opnEmuClock += cyc;
       msAcc += cyc;
@@ -1174,6 +1200,10 @@ void cpuTask(void *pvParameters) {
     }
 #ifdef USE_SERIAL_DEBUG
     int64_t elapsed = esp_timer_get_time() - frameStart;
+#if MZ_Z80_PROF
+    dbgCycZ80 += dbgZ80Frame;
+    if (dbgZ80Frame > dbgZ80Max) dbgZ80Max = dbgZ80Frame;
+#endif
     if (elapsed < dbgMin) dbgMin = elapsed;
     if (elapsed > dbgMax) dbgMax = elapsed;
     dbgSum += elapsed;
@@ -1184,6 +1214,12 @@ void cpuTask(void *pvParameters) {
                     (int)((int64_t)dbgFrameCnt * frameTimeUs * 100 / (wall > 0 ? wall : 1)),
                     (long long)dbgMin, (long long)dbgMax, (long long)(dbgSum / dbgFrameCnt), dbgOverBudget, dbgFrameCnt,
                     (long long)frameTimeUs, (long long)(dbgIdle / dbgFrameCnt));
+#if MZ_Z80_PROF
+      Serial.printf("Z80 (z80core): avg=%uus max=%uus per frame | IRQ in %d frames: line end %u, after EI %u\n",
+                    (unsigned)(dbgCycZ80 / 240 / dbgFrameCnt), (unsigned)(dbgZ80Max / 240), dbgFrameCnt,
+                    (unsigned)dbgIrqLine, (unsigned)(mz_irq_taken_ei - dbgIrqEi0));
+      dbgCycZ80 = 0; dbgZ80Max = 0; dbgIrqLine = 0; dbgIrqEi0 = mz_irq_taken_ei;
+#endif
       dbgMin = INT64_MAX; dbgMax = dbgSum = dbgIdle = 0;
       dbgOverBudget = dbgFrameCnt = 0;
     }

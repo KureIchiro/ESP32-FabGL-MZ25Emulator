@@ -158,9 +158,10 @@ uint8_t MZ_FAST mzIrqAck() {
     return 0xFF;
 }
 
-extern "C" int MZ_FAST mzIrqTake(void) { return mzIrqPending() ? mzIrqAck() : -1; }
+uint32_t mz_irq_taken_ei;
+extern "C" int MZ_FAST mzIrqTake(void) { const int v = mzIrqPending() ? mzIrqAck() : -1; if (v >= 0) mz_irq_taken_ei++; return v; }
 
-extern "C" void MZ_FAST mzReti(void) {
+extern "C" void mzReti(void) {
     for (int ch = 0; ch < 2; ch++) if (pio[ch].inService) { pio[ch].inService = false; return; }
     if (mz_sio_irq & 2) { mzSioReti(); return; }
     for (int ch = 0; ch < 4; ch++) if (irqc[ch].inService) { irqc[ch].inService = false; return; }
