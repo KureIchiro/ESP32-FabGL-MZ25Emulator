@@ -18,7 +18,7 @@ An emulator for the Sharp MZ-2500 (SuperMZ) using ESP32 and the **FabGL** librar
   - The 256-colour modes (320x200 / 320x400) are shown with a 2x2 pattern of 4 colours per dot (an ordered dither). In these modes the 16 output colours are switched to the CGA 16 colours, which the TTGO VGA32 shows exactly, and for each of the 512 RGB values the 4 colours whose average is closest (weighted by brightness) are used, so intermediate colours such as skin tones and sky blue come out close. Text shown over these modes uses the nearest CGA colour. Set `MZ_TILE256` in `mz.h` to 0 to use the single nearest colour instead.
 - **Drive swap**: bit 1 of YM2203 port A swaps drives 1/2 with 3/4, as on the real machine.
 - **Not emulated**: MZ-80B / MZ-2000 modes, cassette tape, RS-232C, printer, 2HD disks.
-- **Audio**: 16384 Hz (FabGL default). FM and SSG are mixed with the same balance as Common Source Project (SSG 8 dB below FM).
+- **Audio**: 32768 Hz (`SOUND_RATE` near the top of `MZ2500_v2.ino`; 16384 = the FabGL default used before). FM and SSG are mixed with the same balance as Common Source Project (SSG 8 dB below FM).
 - **Speed**:
   - Only the lines whose content changed since they were last drawn are drawn again (the VRAM, text and PCG writes, the display registers and the colours are tracked for each line). A frame in which nothing on the screen changed is not drawn at all.
   - Lines are drawn 8 dots at a time, and the graphics / text of the previous line are reused when they are the same. When a line would come out exactly the same as the line above (200-line graphics and doubled 8-line characters), the line above is copied instead of being drawn.
@@ -174,7 +174,7 @@ ESP32 と **FabGL** ライブラリを使った シャープ MZ-2500（SuperMZ�
   - 256 色のモード（320×200 / 320×400）は、1 ドットを 4 色の 2×2 の模様（ディザ）で表示します。このモードのときは出力の 16 色を CGA の 16 色（TTGO VGA32 でそのまま出せる色）に切り替え、512 通りの色それぞれについて、4 色の平均が明るさの重みでいちばん近くなる組を使うので、肌色や空色などの中間の色も近い色になります。このモードの上に重なるテキストは、いちばん近い CGA の色になります。`mz.h` の `MZ_TILE256` を 0 にすると、いちばん近い 1 色で表示します。
 - **ドライブの入れ替え**: 実機と同じく、YM2203 のポート A の bit1 でドライブ 1・2 と 3・4 が入れ替わります。
 - **再現していないもの**: MZ-80B / MZ-2000 モード、カセットテープ、RS-232C、プリンタ、2HD のディスク。
-- **サウンド**: 16384Hz（FabGL の標準）。FM と SSG の音量の比は Common Source Project と同じです（SSG は FM より 8dB 小さい）。
+- **サウンド**: 32768Hz（`MZ2500_v2.ino` の先頭近くの `SOUND_RATE`。16384 にすると以前の FabGL の標準と同じ）。FM と SSG の音量の比は Common Source Project と同じです（SSG は FM より 8dB 小さい）。
 - **速さの工夫**:
   - 前に描いたときから中身が変わったラインだけを描き直します（VRAM・テキスト・PCG の書き換え、表示のレジスタ、色をラインごとに見ています）。画面が何も変わっていないフレームは描きません。
   - ラインは 8 ドットずつまとめて描き、前のラインと同じグラフィック・テキストは作り直しません。すぐ上のラインとまったく同じになるライン（200 ラインのグラフィックと、8 ラインの文字を 2 倍にしたテキスト）は、描かずに上のラインを写します。

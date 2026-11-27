@@ -96,6 +96,8 @@
 // #define SD_MOSI 2
 // #define SD_CS   13
 
+#define SOUND_RATE 32768
+
 struct D88Image { uint32_t ofs, size; char name[18]; };
 static const int D88_MAX_IMAGES = 16;
 struct MzKeyMap { uint8_t ps2; bool ext; uint8_t key; };
@@ -108,7 +110,7 @@ public:
 
 MzVGA16 DisplayController;
 fabgl::Canvas *canvas;
-fabgl::SoundGenerator soundGenerator;
+fabgl::SoundGenerator soundGenerator(SOUND_RATE);
 fabgl::PS2Controller PS2Controller;
 
 volatile bool frameReady = false;
@@ -310,6 +312,7 @@ class OpnGenerator : public fabgl::WaveformGenerator {
   uint32_t toneOut = 0, noiseCounter = 0, lfsr = 1, noiseOut = 0;
   const int16_t volTable[16] = { 0, 1, 1, 2, 3, 4, 6, 8, 11, 16, 22, 32, 45, 64, 90, 127 };
   int32_t  dcPrev = 0, dcOut = 0;
+  static const int DC_SHIFT = SOUND_RATE >= 32768 ? 9 : 8;
   #define FM_TREBLE_FIX 320
   int32_t  fmLp = 0;
   uint8_t  spk = 0;
@@ -479,7 +482,7 @@ public:
           else lv = (spk & 0x80) ? 256 : 0;
           x += lv * SPK_AMP;
         }
-        dcOut = x - dcPrev + dcOut - (dcOut >> 8);
+        dcOut = x - dcPrev + dcOut - (dcOut >> DC_SHIFT);
         dcPrev = x;
         int32_t s = dcOut >> 8;
         if (s > 96) s = 96 + (s - 96) / 3; else if (s < -96) s = -96 + (s + 96) / 3;
@@ -1295,7 +1298,7 @@ void setup() {
     while (1) delay(1000);
   }
 
-  opnGen.begin(16384);
+  opnGen.begin(SOUND_RATE);
   soundGenerator.attach(&opnGen);
   opnGen.enable(true);
   soundGenerator.setVolume(100);
